@@ -180,7 +180,12 @@ wss.on('connection', (ws, req) => {
       if (ws.clientId) {
         const id = ws.clientId;
         // If this is an application message
-        if (msg.action === 'message' || msg.type === 'message') {
+       if (
+          msg.action === 'message' ||
+          msg.action === 'ledOn' ||
+          msg.action === 'ledOff' ||
+          msg.type === 'message'
+          ){
           log.info(`📩 Reçu message de ${id}: ${JSON.stringify(msg)}`);
 
           // forward to ESP32(s) if available
