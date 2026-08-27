@@ -48,8 +48,28 @@ app.use((req, res, next) => {
     next();
 });
 
+// accept JSON bodies (for client log forwarding)
+app.use(express.json({ limit: '32kb' }));
+
 app.get('/', (req, res) => {
     res.send('Serveur WebSocket Sécurisé OK');
+});
+
+// POST /client-logs (forwarded from browser console via sendBeacon/fetch)
+app.post('/client-logs', (req, res) => {
+  try {
+    const { level, msg, ts } = req.body || {};
+    const entry = {
+      ts: ts || new Date().toISOString(),
+      level: level || 'info',
+      message: '[client] ' + (msg || '')
+    };
+    pushLog(entry.level, entry.message);
+    res.status(204).end();
+  } catch (err) {
+    console.error('client-logs error', err);
+    res.status(500).json({ error: 'internal' });
+  }
 });
 
 // expose last logs as JSON
