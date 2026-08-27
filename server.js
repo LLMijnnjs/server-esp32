@@ -29,32 +29,47 @@ app.get('/', (req, res) => {
     res.send('Serveur WebSocket Sécurisé OK');
 });
 
+function normalizeId(id) {
+    if (!id || typeof id !== 'string') return id;
+    // accept both PHONE1 or PHONE_1 formats
+    if (id.match(/^PHONE[ _]?1$/i)) return 'PHONE_1';
+    if (id.match(/^PHONE[ _]?2$/i)) return 'PHONE_2';
+    if (id.toUpperCase() === 'ESP32A' || id.toUpperCase() === 'ESP32_A') return 'ESP32_A';
+    if (id.toUpperCase() === 'ESP32B' || id.toUpperCase() === 'ESP32_B') return 'ESP32_B';
+    return id.toUpperCase();
+}
+
 wss.on('connection', (ws) => {
     console.log('📡 Nouvelle connexion');
     
     ws.on('message', (data) => {
         try {
             const msg = JSON.parse(data);
-            
-            const id = msg.id;
+            const rawId = msg.id;
+            const id = normalizeId(rawId);
             const password = msg.password;
-            
+
             // ✅ Vérifier que l'ID existe
             if (!PASSWORDS[id]) {
-                console.log(`❌ ID invalide: ${id}`);
+                console.log(`❌ ID invalide: ${rawId} -> normalized=${id}`);
+                // respond explicitly so the client can react
+                try { ws.send(JSON.stringify({ type: 'auth', status: 'denied', reason: 'invalid id' })); } catch(e){}
                 return;
             }
             
             // ✅ Vérifier le password
             if (password !== PASSWORDS[id]) {
                 console.log(`❌ Password incorrect pour ${id}`);
-                ws.send(JSON.stringify({error: 'Password incorrect'}));
+                try { ws.send(JSON.stringify({ type: 'auth', status: 'denied', reason: 'password incorrect' })); } catch(e){}
                 return;
             }
             
             console.log(`✓ ${id} authentifié!`);
+
+            // send explicit auth ok to the client
+            try { ws.send(JSON.stringify({ type: 'auth', status: 'ok' })); } catch(e){}
             
-            // ✅ Identifier
+            // ✅ Identifier (store the socket)
             if (id === 'ESP32_A') {
                 esp32_A = ws;
                 console.log('✓ ESP32_A connecté');
@@ -62,28 +77,30 @@ wss.on('connection', (ws) => {
                 esp32_B = ws;
                 console.log('✓ ESP32_B connecté');
             } else if (id === 'PHONE_1' || id === 'PHONE_2') {
-                phones.push(ws);
+                if (!phones.includes(ws)) phones.push(ws);
                 console.log(`📱 ${id} connecté`);
             }
             
-            // ✅ Relayer
+            // ✅ Relayer: attach origin and forward to other endpoints
             msg.from = id;
-            
+
+            // forward to ESP32s if phones sent message
             if ((id === 'PHONE_1' || id === 'PHONE_2') && esp32_A) {
-                esp32_A.send(JSON.stringify(msg));
+                try { esp32_A.send(JSON.stringify(msg)); } catch(e) { console.error('send to esp32_A failed', e); }
             }
             if ((id === 'PHONE_1' || id === 'PHONE_2') && esp32_B) {
-                esp32_B.send(JSON.stringify(msg));
+                try { esp32_B.send(JSON.stringify(msg)); } catch(e) { console.error('send to esp32_B failed', e); }
             }
             if (id === 'ESP32_A' && esp32_B) {
-                esp32_B.send(JSON.stringify(msg));
+                try { esp32_B.send(JSON.stringify(msg)); } catch(e) { console.error('send to esp32_B failed', e); }
             }
             if (id === 'ESP32_B' && esp32_A) {
-                esp32_A.send(JSON.stringify(msg));
+                try { esp32_A.send(JSON.stringify(msg)); } catch(e) { console.error('send to esp32_A failed', e); }
             }
             
         } catch(e) {
-            console.error('❌ Erreur:', e);
+            console.error('❌ Erreur lors du parsing ou du traitement:', e);
+            try { ws.send(JSON.stringify({ type: 'error', message: 'invalid message' })); } catch(e){}
         }
     });
     
