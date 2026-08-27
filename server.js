@@ -175,7 +175,43 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data);
-      const rawId = msg.id;
+
+      // If socket already authenticated earlier, prefer that identity
+      if (ws.clientId) {
+        const id = ws.clientId;
+        // If this is an application message
+        if (msg.action === 'message' || msg.type === 'message') {
+          log.info(`📩 Reçu message de ${id}: ${JSON.stringify(msg)}`);
+
+          // forward to ESP32(s) if available
+          if ((id === 'PHONE_1' || id === 'PHONE_2') && esp32_A) {
+            try { esp32_A.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_A failed ' + e.message); }
+          }
+          if ((id === 'PHONE_1' || id === 'PHONE_2') && esp32_B) {
+            try { esp32_B.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_B failed ' + e.message); }
+          }
+
+          // ACK back to sender if msgId present
+          if (msg.msgId) {
+            try { ws.send(JSON.stringify({ type: 'ack', msgId: msg.msgId, status: 'ok' })); } catch (e) { log.error('ack send failed ' + e.message); }
+          }
+          return;
+        }
+
+        // Other messages (non-auth) from authenticated socket: attach origin and forward as earlier
+        msg.from = id;
+        if (id === 'ESP32_A' && esp32_B) {
+          try { esp32_B.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_B failed ' + e.message); }
+        }
+        if (id === 'ESP32_B' && esp32_A) {
+          try { esp32_A.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_A failed ' + e.message); }
+        }
+
+        return;
+      }
+
+      // Socket not authenticated yet: try to treat this message as an auth attempt
+      const rawId = msg.id || msg.rawId;
       const id = normalizeId(rawId);
       const password = msg.password;
 
@@ -195,6 +231,8 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      // authentication successful
+      ws.clientId = id;
       log.info(`✓ ${id} authentifié!`);
       try { ws.send(JSON.stringify({ type: 'auth', status: 'ok' })); } catch (e) { log.error('send failed: ' + e.message); }
 
@@ -210,21 +248,7 @@ wss.on('connection', (ws, req) => {
         log.info(`📱 ${id} connecté`);
       }
 
-      // attach origin and forward to other endpoints
-      msg.from = id;
-
-      if ((id === 'PHONE_1' || id === 'PHONE_2') && esp32_A) {
-        try { esp32_A.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_A failed ' + e.message); }
-      }
-      if ((id === 'PHONE_1' || id === 'PHONE_2') && esp32_B) {
-        try { esp32_B.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_B failed ' + e.message); }
-      }
-      if (id === 'ESP32_A' && esp32_B) {
-        try { esp32_B.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_B failed ' + e.message); }
-      }
-      if (id === 'ESP32_B' && esp32_A) {
-        try { esp32_A.send(JSON.stringify(msg)); } catch (e) { log.error('send to esp32_A failed ' + e.message); }
-      }
+      // don't forward the auth message as a payload to other peers
 
     } catch (e) {
       log.error('❌ Erreur lors du parsing ou du traitement: ' + (e && e.stack ? e.stack : e));
