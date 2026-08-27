@@ -256,11 +256,12 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('close', () => {
-    if (ws === esp32_A) esp32_A = null;
-    if (ws === esp32_B) esp32_B = null;
-    phones = phones.filter(p => p !== ws);
-    log.info('⚠️ Connexion fermée');
+  ws.on('close', (code, reason) => {
+  if (ws === esp32_A) esp32_A = null;
+  if (ws === esp32_B) esp32_B = null;
+  phones = phones.filter(p => p !== ws);
+
+  log.info(`⚠️ Connexion fermée — code=${code}, reason=${reason}`);
   });
 });
 
